@@ -32,11 +32,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("국민의 소리")
         self.resize(1100, 700)
 
-        # TODO: 서버(server.py) 준비되면 아래 두 줄로 원복
-        # self.expert_panel = ExpertPanel(network_client=network_client)
-        # self.easy_panel = EasyPanel(network_client=network_client)
-        self.expert_panel = ExpertPanel(network_client=None)  # 임시: _StubService로 GUI만 확인
-        self.easy_panel = EasyPanel(network_client=None)  # 임시: _StubService로 GUI만 확인
+        self.expert_panel = ExpertPanel(network_client=network_client)
+        self.easy_panel = EasyPanel(network_client=network_client)
 
         self.mode_change = QStackedWidget()
         self.mode_change.addWidget(self.expert_panel)  # EXPERT_MODE

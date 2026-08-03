@@ -5,12 +5,25 @@
 코드 수정 없이 이 파일만 바꿔서 접속 정보를 변경할 수 있게 한다 (VOP-004).
 """
 
+import os
+import socket
 from pathlib import Path
 
+
+def _detect_default_host() -> str:
+    """현재 머신의 실제 LAN IP를 자동으로 찾아 반환한다."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
 # ── RAG 서버 접속 주소 (클라이언트가 사용) ──────────────────────
-# 클라이언트 3대가 TCP로 접속할 서버 PC의 LAN 주소. 실제 IP로 바꿔서 쓴다.
-SERVER_HOST = "192.168.0.10"
-SERVER_PORT = 9000
+# 다른 PC에서 접속할 때는 클라이언트 쪽에서 RAG_SERVER_HOST 환경변수로 이 서버의 IP를 지정하면 된다.
+SERVER_HOST = os.getenv("RAG_SERVER_HOST", "10.10.10.137")
+SERVER_PORT = int(os.getenv("RAG_SERVER_PORT", "9000"))
 
 # ── Ollama (서버 전용) ──────────────────────────────────────
 # 서버 프로세스와 Ollama가 같은 PC에 있으므로 localhost로 접속한다.

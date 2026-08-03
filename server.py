@@ -102,19 +102,29 @@ def _send_message(sock: socket.socket, message: dict) -> None:
     sock.sendall(header + body)
 
 
+def _coerce_mode(value: object) -> Mode:
+    if isinstance(value, Mode):
+        return value
+    if isinstance(value, str):
+        normalized = value.upper()
+        if normalized in {Mode.EXPERT.value, Mode.EASY.value}:
+            return Mode(normalized)
+    raise ValueError(f"지원하지 않는 모드 값: {value}")
+
+
 def _payload_to_remote_query_request(payload: dict) -> RemoteQueryRequest:
     filters = SearchFilters(**(payload.get("filters") or {}))
     return RemoteQueryRequest(
         session_id=payload["session_id"],
         query=payload["query"],
         filters=filters,
-        mode=Mode(payload["mode"]),
+        mode=_coerce_mode(payload["mode"]),
         top_k=payload.get("top_k", config.TOP_K_DEFAULT),
     )
 
 
 def _payload_to_mode_switch_request(payload: dict) -> ModeSwitchRequest:
-    return ModeSwitchRequest(session_id=payload["session_id"], new_mode=Mode(payload["new_mode"]))
+    return ModeSwitchRequest(session_id=payload["session_id"], new_mode=_coerce_mode(payload["new_mode"]))
 
 
 class ClientHandler(threading.Thread):
