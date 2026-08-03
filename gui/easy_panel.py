@@ -14,19 +14,82 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QScrollArea
 )
 from PySide6.QtGui import QFont
+from PySide6.QtCore import Signal, QThread
 
 from common.schemas import (
-    SearchRequest, SearchFilters, Mode, EasySummaryResponse
+    RemoteQueryRequest, RemoteQueryResponse, RetrievedChunk,
+    SearchFilters, Mode, EasySummaryResponse
 )
 from gui.glossary_widget import GlossaryWidget
 
+class _StubService:
+    """②의 H2 인터페이스가 나오기 전까지 쓰는 고정 응답. Day 5 통합 때 교체한다."""
+
+    def query(self, request: RemoteQueryRequest) -> RemoteQueryResponse:
+        if not request.filters.category:
+            return RemoteQueryResponse(
+                session_id=request.session_id,
+                found=False,
+                top_similarity=0.0,
+                chunks=[],
+                response=None,
+                error=None,
+                search_time_ms=0,
+            )
+        return RemoteQueryResponse(
+            session_id=request.session_id,
+            found=True,
+            top_similarity=0.71,
+            chunks=[
+                RetrievedChunk(
+                    chunk_id="052147-0002",
+                    text="간병비 부담이 가구 소득의 절반을 넘는 사례가 늘고 있습니다.",
+                    dense_similarity=0.71,
+                    meeting_date="2024-09-01",
+                    meeting_label="제422회 본회의 3차",
+                    speaker="김OO 위원 → 이OO 장관",
+                    citation_id=1,
+                ),
+            ],
+            response=EasySummaryResponse(
+                decision="간병비 지원을 늘리기로 했어요.",
+                reason="어르신 돌봄 비용이 너무 많이 들어서 걱정하는 분들이 많았어요.",
+                change="내년부터 10개 지역에서 먼저 시범적으로 지원이 시작돼요.",
+                glossary=[
+                    {"term": "시범사업", "definition": "본격 시행 전에 일부 지역에서 먼저 해보는 것"},
+                ],
+                generated_at="2024-09-01T00:00:00",
+            ),
+            error=None,
+            search_time_ms=110,
+        )
+
+class SearchWorker(QThread):
+    """NetworkClient.query()를 백그라운드 스레드에서 실행한다."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, network_client, request, parent=None):
+        super().__init__(parent)
+        self.network_client = network_client
+        self.request = request
+
+    def run(self) -> None:
+        try:
+            response = self.network_client.query(self.request)
+            self.succeeded.emit(response)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 class EasyPanel(QWidget):
     """쉬운모드 패널 - 고령자 친화 인터페이스"""
 
     # Signal 정의
-    search_requested = pyqtSignal(SearchRequest)
-    mode_switch_requested = pyqtSignal(dict)
+    search_requested = Signal(RemoteQueryRequest)
+    mode_switch_requested = Signal(dict)
+    busy_changed = Signal(bool)
+    status_message = Signal(str)
 
     # 카테고리 매핑
     CATEGORY_MAP = {
@@ -36,10 +99,12 @@ class EasyPanel(QWidget):
         "교육·복지": "cat_society"
     }
 
-    def __init__(self, parent=None):
+    def __init__(self, network_client=None, parent=None):
         super().__init__(parent)
+        self.network_client = network_client or _StubService()
         self.session_id = "easy_mode"
         self.current_response = None
+        self._busy = False
         self.init_ui()
 
     def init_ui(self):
@@ -175,6 +240,10 @@ class EasyPanel(QWidget):
         # 신호 연결
         self._connect_signals()
 
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.enable_buttons(not busy)
+
     def _create_category_button(self, category_name: str) -> QPushButton:
         """카테고리 버튼 생성"""
         btn = QPushButton(category_name)
@@ -212,19 +281,43 @@ class EasyPanel(QWidget):
 
     def _on_category_clicked(self, category_name: str):
         """카테고리 버튼 클릭 핸들러"""
+        if self._busy:
+            return
         category_filter = self.CATEGORY_MAP[category_name]
-
-        # SearchRequest 생성
         filters = SearchFilters(category=category_filter)
-        request = SearchRequest(
+        request = RemoteQueryRequest(
             session_id=self.session_id,
-            query="",  # 카테고리 검색은 쿼리 없음
+            query="",
             filters=filters,
+            mode=Mode.EASY,
             top_k=5
         )
 
-        # 검색 신호 발생
-        self.search_requested.emit(request)
+        self._set_busy(True)
+        self.busy_changed.emit(True)
+
+        self._worker = SearchWorker(self.network_client, request)
+        self._worker.succeeded.connect(self._on_search_succeeded)
+        self._worker.failed.connect(self._on_search_failed)
+        self._worker.finished.connect(self._on_search_finished)
+        self._worker.start()
+
+    def _on_search_succeeded(self, response) -> None:
+        if not response.found:
+            self.display_no_evidence()
+            self.status_message.emit(
+                f"근거 없음 (최고 유사도 {response.top_similarity:.2f})")
+            return
+        self.display_summary(response.response)
+        self.status_message.emit(f"검색 결과 {len(response.chunks)}건")
+
+    def _on_search_failed(self, error_message: str) -> None:
+        self.display_no_evidence()
+        self.status_message.emit(f"오류: {error_message}")
+
+    def _on_search_finished(self) -> None:
+        self._set_busy(False)
+        self.busy_changed.emit(False)
 
     def _connect_signals(self):
         """신호 연결"""
