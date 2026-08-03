@@ -9,7 +9,7 @@ from pathlib import Path
 
 # ── RAG 서버 접속 주소 (클라이언트가 사용) ──────────────────────
 # 클라이언트 3대가 TCP로 접속할 서버 PC의 LAN 주소. 실제 IP로 바꿔서 쓴다.
-SERVER_HOST = "192.168.0.10"
+SERVER_HOST = "10.10.10.137"
 SERVER_PORT = 9000
 
 # ── Ollama (서버 전용) ──────────────────────────────────────
@@ -17,7 +17,7 @@ SERVER_PORT = 9000
 OLLAMA_HOST = "http://localhost:11434"
 
 # 생성 모델. 모델 교체는 이 한 줄만 수정한다 (GGUF 로딩 실패 시 대체 모델 전환용).
-LLM_MODEL = "qwen2.5:14b"
+LLM_MODEL = "gemma4:12b"
 
 # 임베딩 모델. 서버 기동 시 data/meta.json의 embed_model·dim과 대조한다 (인터페이스 정의서 §3.5).
 EMBED_MODEL = "bge-m3"

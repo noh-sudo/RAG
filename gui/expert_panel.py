@@ -62,83 +62,6 @@ NO_EVIDENCE_TEXT = (
     "표현으로 바꿔 검색해 보세요.</p>"
 )
 
-
-class _StubService:
-    """②의 H2 인터페이스가 나오기 전까지 쓰는 고정 응답. Day 5 통합 때 교체한다."""
-
-    def query(self, request: RemoteQueryRequest) -> RemoteQueryResponse:
-        if "없는말" in request.query:
-            return RemoteQueryResponse(
-                session_id=request.session_id,
-                found=False,
-                top_similarity=0.21,
-                chunks=[],
-                response=None,
-                error=None,
-                search_time_ms=0,
-            )
-        return RemoteQueryResponse(
-            session_id=request.session_id,
-            found=True,
-            top_similarity=0.68,
-            chunks=[
-                RetrievedChunk(
-                    chunk_id="052147-0002",
-                    text="간병비 부담이 가구 소득의 절반을 넘는 사례가 늘고 있습니다.",
-                    dense_similarity=0.68,
-                    meeting_date="2024-09-01",
-                    meeting_label="제422회 본회의 3차",
-                    speaker="김OO 위원 → 이OO 장관",
-                    citation_id=1,
-                ),
-            ],
-            response=ExpertSummaryResponse(
-                summary_text="간병비 급여화 요구에 정부가 시범사업 확대로 답했다. "
-                             "확대 규모는 10개 지역, 시점은 내년 상반기다.[1]",
-                key_issues=["간병비 부담 완화", "시범사업 확대 시점"],
-                citations=[
-                    {
-                        "citation_id": 1,
-                        "meeting_label": "제422회 본회의 3차",
-                        "meeting_date": "2024-09-01",
-                        "speaker": "김OO 위원 → 이OO 장관",
-                    },
-                ],
-                generated_at="2024-09-01T00:00:00",
-            ),
-            error=None,
-            search_time_ms=120,
-        )
-
-    def switch_mode(self, request) -> RemoteQueryResponse:
-        return RemoteQueryResponse(
-            session_id=request.session_id,
-            found=True,
-            top_similarity=0.68,
-            chunks=[],
-            response=ExpertSummaryResponse(
-                summary_text="(전문가모드로 전환됨) 간병비 급여화 요구에 정부가 시범사업 확대로 답했다.[1]",
-                key_issues=["간병비 부담 완화"],
-                citations=[{"citation_id": 1, "meeting_label": "제422회 본회의 3차",
-                            "meeting_date": "2024-09-01", "speaker": "김OO 위원 → 이OO 장관"}],
-                generated_at="2024-09-01T00:00:00",
-            ),
-            error=None,
-            search_time_ms=50,
-        )
-
-    def switch_mode(self, request: ModeSwitchRequest) -> ModeSwitchResponse:
-        return ModeSwitchResponse(
-            cache_hit=True,
-            response=ExpertSummaryResponse(
-                summary_text="(전문가모드로 전환됨) 간병비 급여화 요구에 정부가 시범사업 확대로 답했다.[1]",
-                key_issues=["간병비 부담 완화"],
-                citations=[{"citation_id": 1, "meeting_label": "제422회 본회의 3차",
-                            "meeting_date": "2024-09-01", "speaker": "김OO 위원 → 이OO 장관"}],
-                generated_at="2024-09-01T00:00:00",
-            ),
-        )
-
 class SearchWorker(QThread):
     """NetworkClient.query()를 백그라운드 스레드에서 실행한다.
     GUI 스레드를 막지 않기 위한 필수 구조 (인터페이스 정의서 §3.2)."""
@@ -187,8 +110,9 @@ class ExpertPanel(QWidget):
 
     def __init__(self, network_client=None, session_id: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.network_client = network_client or _StubService()
+        self.network_client = network_client
         self.session_id = session_id or str(uuid.uuid4())
+        
         self._results: List[dict] = []
         self._busy = False
 

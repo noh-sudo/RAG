@@ -47,60 +47,6 @@ class ModeSwitchWorker(QThread):
         except Exception as exc:
             self.failed.emit(str(exc))
 
-class _StubService:
-    """②의 H2 인터페이스가 나오기 전까지 쓰는 고정 응답. Day 5 통합 때 교체한다."""
-
-    def query(self, request: RemoteQueryRequest) -> RemoteQueryResponse:
-        if not request.filters.category:
-            return RemoteQueryResponse(
-                session_id=request.session_id,
-                found=False,
-                top_similarity=0.0,
-                chunks=[],
-                response=None,
-                error=None,
-                search_time_ms=0,
-            )
-        return RemoteQueryResponse(
-            session_id=request.session_id,
-            found=True,
-            top_similarity=0.71,
-            chunks=[
-                RetrievedChunk(
-                    chunk_id="052147-0002",
-                    text="간병비 부담이 가구 소득의 절반을 넘는 사례가 늘고 있습니다.",
-                    dense_similarity=0.71,
-                    meeting_date="2024-09-01",
-                    meeting_label="제422회 본회의 3차",
-                    speaker="김OO 위원 → 이OO 장관",
-                    citation_id=1,
-                ),
-            ],
-            response=EasySummaryResponse(
-                decision="간병비 지원을 늘리기로 했어요.",
-                reason="어르신 돌봄 비용이 너무 많이 들어서 걱정하는 분들이 많았어요.",
-                change="내년부터 10개 지역에서 먼저 시범적으로 지원이 시작돼요.",
-                glossary=[
-                    {"term": "시범사업", "definition": "본격 시행 전에 일부 지역에서 먼저 해보는 것"},
-                ],
-                generated_at="2024-09-01T00:00:00",
-            ),
-            error=None,
-            search_time_ms=110,
-        )
-
-    def switch_mode(self, request: ModeSwitchRequest) -> ModeSwitchResponse:
-        return ModeSwitchResponse(
-            cache_hit=True,
-            response=EasySummaryResponse(
-                decision="(쉬운모드로 전환됨) 간병비 지원을 늘리기로 했어요.",
-                reason="어르신 돌봄 비용이 너무 많이 들어서 걱정하는 분들이 많았어요.",
-                change="내년부터 10개 지역에서 먼저 시범적으로 지원이 시작돼요.",
-                glossary=[{"term": "시범사업", "definition": "본격 시행 전에 일부 지역에서 먼저 해보는 것"}],
-                generated_at="2024-09-01T00:00:00",
-            ),
-        )
-
 class SearchWorker(QThread):
     """NetworkClient.query()를 백그라운드 스레드에서 실행한다."""
 
@@ -138,7 +84,7 @@ class EasyPanel(QWidget):
 
     def __init__(self, network_client=None, session_id: str | None = None, parent=None):
         super().__init__(parent)
-        self.network_client = network_client or _StubService()
+        self.network_client = network_client
         self.session_id = session_id or "easy_mode"
         self.current_response = None
         self._busy = False
