@@ -1,5 +1,7 @@
 .venv
 .vscode
+__pycache__
+*.pyc
 .claude
 .obsidian
 .idea
