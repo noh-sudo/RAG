@@ -32,15 +32,22 @@ from common.schemas import (
     RetrievedChunk,
     SearchFilters,
     Mode,
-    ExpertSummaryResponse
+    ExpertSummaryResponse,
+    ModeSwitchRequest,
+    ModeSwitchResponse
 )
 
 SUMMARY_TAB = 0
 RAW_TAB = 1
 
-SORTS = ["최신순", "관련순"]
+SORTS = ["관련순", "최신순"]
 ASSEMBLY_TERMS = ["15대", "16대", "17대", "18대", "19대", "20대", "21대"]
-AGENDAS = ["경제", "안보", "교육", "외교", "통일", "국방", "정치", "문화", "노동", "사회"]
+AGENDAS = [
+    "정치",                          # 나라 살림
+    "경제", "노동",                  # 물가와 일자리
+    "외교", "통일", "안보", "국방",   # 안보와 통일
+    "교육", "사회", "문화",          # 교육·복지
+]
 
 def _parse_generation_no(value: Optional[str]) -> Optional[int]:
     """'21대' 형태의 문자열을 int로 변환. None이면 그대로 None."""
@@ -103,6 +110,35 @@ class _StubService:
             search_time_ms=120,
         )
 
+    def switch_mode(self, request) -> RemoteQueryResponse:
+        return RemoteQueryResponse(
+            session_id=request.session_id,
+            found=True,
+            top_similarity=0.68,
+            chunks=[],
+            response=ExpertSummaryResponse(
+                summary_text="(전문가모드로 전환됨) 간병비 급여화 요구에 정부가 시범사업 확대로 답했다.[1]",
+                key_issues=["간병비 부담 완화"],
+                citations=[{"citation_id": 1, "meeting_label": "제422회 본회의 3차",
+                            "meeting_date": "2024-09-01", "speaker": "김OO 위원 → 이OO 장관"}],
+                generated_at="2024-09-01T00:00:00",
+            ),
+            error=None,
+            search_time_ms=50,
+        )
+
+    def switch_mode(self, request: ModeSwitchRequest) -> ModeSwitchResponse:
+        return ModeSwitchResponse(
+            cache_hit=True,
+            response=ExpertSummaryResponse(
+                summary_text="(전문가모드로 전환됨) 간병비 급여화 요구에 정부가 시범사업 확대로 답했다.[1]",
+                key_issues=["간병비 부담 완화"],
+                citations=[{"citation_id": 1, "meeting_label": "제422회 본회의 3차",
+                            "meeting_date": "2024-09-01", "speaker": "김OO 위원 → 이OO 장관"}],
+                generated_at="2024-09-01T00:00:00",
+            ),
+        )
+
 class SearchWorker(QThread):
     """NetworkClient.query()를 백그라운드 스레드에서 실행한다.
     GUI 스레드를 막지 않기 위한 필수 구조 (인터페이스 정의서 §3.2)."""
@@ -122,6 +158,24 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.failed.emit(str(exc))
 
+class ModeSwitchWorker(QThread):
+    """NetworkClient.switch_mode()를 백그라운드 스레드에서 실행한다."""
+
+    succeeded = Signal(object)   # ModeSwitchResponse
+    failed = Signal(str)
+
+    def __init__(self, network_client, request, parent=None):
+        super().__init__(parent)
+        self.network_client = network_client
+        self.request = request
+
+    def run(self) -> None:
+        try:
+            response = self.network_client.switch_mode(self.request)
+            self.succeeded.emit(response)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
 class ExpertPanel(QWidget):
     """시그널
         busy_changed(bool)      요청 중 여부. 셸이 모드 토글을 잠그는 데 쓴다
@@ -131,10 +185,10 @@ class ExpertPanel(QWidget):
     busy_changed = Signal(bool)
     status_message = Signal(str)
 
-    def __init__(self, network_client=None, parent: QWidget | None = None) -> None:
+    def __init__(self, network_client=None, session_id: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.network_client = network_client or _StubService()
-        self.session_id = str(uuid.uuid4())
+        self.session_id = session_id or str(uuid.uuid4())
         self._results: List[dict] = []
         self._busy = False
 
@@ -150,13 +204,12 @@ class ExpertPanel(QWidget):
         self.search.setClearButtonEnabled(True)
 
         self.sort = QComboBox()
-        self.sort.addItem("정렬")
         self.sort.addItems(SORTS)
         self.assembly_term = QComboBox()
-        self.assembly_term.addItem("대수")
+        self.assembly_term.addItem("전체 대수")
         self.assembly_term.addItems(ASSEMBLY_TERMS)
         self.agenda = QComboBox()
-        self.agenda.addItem("주제")
+        self.agenda.addItem("전체 주제")
         self.agenda.addItems(AGENDAS)
         self.search_button = QPushButton("검색")
 
@@ -226,7 +279,7 @@ class ExpertPanel(QWidget):
     # ------------------------------------------------------------------ 검색
     def current_request(self) -> RemoteQueryRequest:
         keyword = self.search.text().strip()
-        agenda_term = self._combo_value(self.agenda, "주제")
+        agenda_term = self._combo_value(self.agenda, "전체 주제")
         combined_query = f"{keyword} {agenda_term}".strip() if agenda_term else keyword
 
         return RemoteQueryRequest(
@@ -234,7 +287,7 @@ class ExpertPanel(QWidget):
             query=combined_query,
             filters=SearchFilters(
                 generation_no=_parse_generation_no(
-                    self._combo_value(self.assembly_term, "대수")
+                    self._combo_value(self.assembly_term, "전체 대수")
                 ),
                 category=None,
             ),
@@ -259,6 +312,39 @@ class ExpertPanel(QWidget):
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
+
+    def on_mode_activated(self) -> None:
+        """상단 토글로 전문가모드가 활성화될 때 MainWindow가 호출한다.
+        검색을 다시 하지 않고 서버 세션 캐시로 재생성만 요청한다 (§4.5)."""
+        if self._busy or self._last_response is None:
+            return  # 아직 검색을 한 적 없으면 전환할 것이 없다
+        if not self._last_response.found:
+            return  # 근거 없음 상태는 전환해도 유지 (§4.5 분기)
+
+        self._set_busy(True)
+        request = ModeSwitchRequest(session_id=self.session_id, new_mode=Mode.EXPERT)
+
+        self._mode_worker = ModeSwitchWorker(self.network_client, request)
+        self._mode_worker.succeeded.connect(self._on_mode_switch_succeeded)
+        self._mode_worker.failed.connect(self._on_mode_switch_failed)
+        self._mode_worker.finished.connect(lambda: self._set_busy(False))
+        self._mode_worker.finished.connect(self._mode_worker.deleteLater)
+        self._mode_worker.start()
+
+    def _on_mode_switch_succeeded(self, response) -> None:
+        if response.response is None:
+            return
+        self._last_response.response = response.response
+        summary = response.response
+        citations = [Citation.from_search_result(r) for r in self._results]
+        self.summary.setHtml(summary.summary_text)
+        self.citation_widget.set_citations(citations)
+        self.status_message.emit(
+            "모드 전환 완료" + (" (캐시 재사용)" if response.cache_hit else "")
+        )
+
+    def _on_mode_switch_failed(self, error_message: str) -> None:
+        self.status_message.emit(f"모드 전환 오류: {error_message}")
 
     def _on_search_succeeded(self, response) -> None:
         self._last_response = response

@@ -15,12 +15,37 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Signal, QThread
+import uuid
 
 from common.schemas import (
-    RemoteQueryRequest, RemoteQueryResponse, RetrievedChunk,
-    SearchFilters, Mode, EasySummaryResponse
+    RemoteQueryRequest,
+    RemoteQueryResponse,
+    RetrievedChunk,
+    SearchFilters,
+    Mode,
+    EasySummaryResponse,
+    ModeSwitchRequest,
+    ModeSwitchResponse
 )
 from gui.glossary_widget import GlossaryWidget
+
+class ModeSwitchWorker(QThread):
+    """NetworkClient.switch_mode()를 백그라운드 스레드에서 실행한다."""
+
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, network_client, request, parent=None):
+        super().__init__(parent)
+        self.network_client = network_client
+        self.request = request
+
+    def run(self) -> None:
+        try:
+            response = self.network_client.switch_mode(self.request)
+            self.succeeded.emit(response)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 class _StubService:
     """②의 H2 인터페이스가 나오기 전까지 쓰는 고정 응답. Day 5 통합 때 교체한다."""
@@ -64,6 +89,18 @@ class _StubService:
             search_time_ms=110,
         )
 
+    def switch_mode(self, request: ModeSwitchRequest) -> ModeSwitchResponse:
+        return ModeSwitchResponse(
+            cache_hit=True,
+            response=EasySummaryResponse(
+                decision="(쉬운모드로 전환됨) 간병비 지원을 늘리기로 했어요.",
+                reason="어르신 돌봄 비용이 너무 많이 들어서 걱정하는 분들이 많았어요.",
+                change="내년부터 10개 지역에서 먼저 시범적으로 지원이 시작돼요.",
+                glossary=[{"term": "시범사업", "definition": "본격 시행 전에 일부 지역에서 먼저 해보는 것"}],
+                generated_at="2024-09-01T00:00:00",
+            ),
+        )
+
 class SearchWorker(QThread):
     """NetworkClient.query()를 백그라운드 스레드에서 실행한다."""
 
@@ -99,10 +136,10 @@ class EasyPanel(QWidget):
         "교육·복지": "cat_society"
     }
 
-    def __init__(self, network_client=None, parent=None):
+    def __init__(self, network_client=None, session_id: str | None = None, parent=None):
         super().__init__(parent)
         self.network_client = network_client or _StubService()
-        self.session_id = "easy_mode"
+        self.session_id = session_id or "easy_mode"
         self.current_response = None
         self._busy = False
         self.init_ui()
@@ -301,6 +338,34 @@ class EasyPanel(QWidget):
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.start()
+
+    def on_mode_activated(self) -> None:
+        """상단 토글로 쉬운모드가 활성화될 때 MainWindow가 호출한다.
+        검색을 다시 하지 않고 서버 세션 캐시로 재생성만 요청한다 (§4.5)."""
+        if self._busy or self.current_response is None:
+            return  # 아직 검색을 한 적 없으면 전환할 것이 없다
+
+        self._set_busy(True)
+        self.busy_changed.emit(True)
+        request = ModeSwitchRequest(session_id=self.session_id, new_mode=Mode.EASY)
+
+        self._mode_worker = ModeSwitchWorker(self.network_client, request)
+        self._mode_worker.succeeded.connect(self._on_mode_switch_succeeded)
+        self._mode_worker.failed.connect(self._on_mode_switch_failed)
+        self._mode_worker.finished.connect(self._on_search_finished)
+        self._mode_worker.finished.connect(self._mode_worker.deleteLater)
+        self._mode_worker.start()
+
+    def _on_mode_switch_succeeded(self, response) -> None:
+        if response.response is None:
+            return
+        self.display_summary(response.response)
+        self.status_message.emit(
+            "모드 전환 완료" + (" (캐시 재사용)" if response.cache_hit else "")
+        )
+
+    def _on_mode_switch_failed(self, error_message: str) -> None:
+        self.status_message.emit(f"모드 전환 오류: {error_message}")
 
     def _on_search_succeeded(self, response) -> None:
         if not response.found:
