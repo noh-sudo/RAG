@@ -5,10 +5,10 @@ services/retrieval.py — [②]
 RetrievalService 정의. server.py만 호출한다.
 
 ■ 팀 확인이 필요한 임의 결정
-- 쿼리 임베딩은 sentence-transformers로 config.EMBED_MODEL("bge-m3")을 로드해 만든다.
-  data_pipeline/build_dense.py(①, 아직 미작성)가 chunks.json을 임베딩할 때 쓴 방식과
-  벡터 공간이 어긋나면 유사도 자체가 무의미해지므로, ①의 실제 구현체와 반드시
-  맞춰봐야 한다(모델 로딩 라이브러리, 정규화 여부 등).
+- 쿼리 임베딩은 data_pipeline/build_dense.py(①)와 동일하게 ollama.embed(model=
+  config.EMBED_MODEL, ...)로 만든다 — Ollama가 서빙하는 bge-m3를 그대로 호출해야
+  build_dense.py가 만든 벡터와 같은 공간에 놓이기 때문이다(feature/data 브랜치의
+  build_dense.py 실제 구현 확인 완료, 2026-08-03).
 - RetrievedChunk.speaker는 질문자/답변자 중 누구를 넣어야 하는지 인터페이스 정의서에
   명시가 없어, 각주에 인용되는 쪽이 보통 답변 내용이라고 보아 답변자를 기본값으로
   삼았다. ③ 담당(citation_widget.py)이 다른 표기를 요구하면 _to_retrieved_chunk()만
@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+import ollama
 
 import config
 from common.schemas import RetrievedChunk, SearchFilters, SearchRequest, SearchResult
@@ -29,7 +29,6 @@ class RetrievalService:
     def __init__(self) -> None:
         self._client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
         self._collection = self._client.get_collection(config.CHROMA_COLLECTION_NAME)
-        self._embedder = SentenceTransformer(config.EMBED_MODEL)
 
     def search(self, request: SearchRequest) -> SearchResult:
         """§4.3 검색 흐름. 임계값 게이트(1차 방어선)를 여기서 적용한다.
@@ -71,7 +70,9 @@ class RetrievalService:
         의존하면 안 되기 때문이다.
         """
         where = self._build_where(filters) if filters else None
-        embedding = self._embedder.encode(query).tolist()
+        # build_dense.py의 embed_batch()와 동일한 호출 (ollama.embed는 input에
+        # 리스트를 받아 embeddings 리스트를 반환한다).
+        embedding = ollama.embed(model=config.EMBED_MODEL, input=[query])["embeddings"][0]
 
         result = self._collection.query(
             query_embeddings=[embedding],
