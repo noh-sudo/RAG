@@ -56,7 +56,8 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 def build_metadata(chunk: dict) -> dict:
-    """ChromaDB where 필터에 쓸 메타데이터만 추린다."""
+    """ChromaDB where 필터·②의 RetrievedChunk 조립(_to_retrieved_chunk)에 쓸 메타데이터.
+    answerer 3종은 services/retrieval.py가 speaker 필드를 만드는 데 직접 참조한다."""
     return {
         "generation_no": chunk["generation_no"],
         "meeting_no": chunk["meeting_no"],
@@ -64,6 +65,9 @@ def build_metadata(chunk: dict) -> dict:
         "meeting_date": chunk["meeting_date"],
         "meeting_date_ts": chunk["meeting_date_ts"],
         "questioner": chunk["questioner"],
+        "answerer": chunk["answerer"],
+        "answerer_position": chunk["answerer_position"],
+        "answerer_affiliation": chunk["answerer_affiliation"],
         "cat_politics": chunk["cat_politics"],
         "cat_economy": chunk["cat_economy"],
         "cat_diplomacy": chunk["cat_diplomacy"],
