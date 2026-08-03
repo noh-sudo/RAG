@@ -210,9 +210,9 @@ class ClientHandler(threading.Thread):
                 )
             )
             if summary_response is None:
-                # 2차 방어선: 거부 문구 감지 → found=False로 강등
-                found = False
-                chunks = []
+                # 생성 실패 시에도 근거 청크는 유지하고 found=True로 둔다.
+                # 이렇게 해야 포괄적 질문에서도 검색 결과를 확인할 수 있다.
+                summary_response = None
 
         self._mode_manager.remember_search(
             session_id=request.session_id,

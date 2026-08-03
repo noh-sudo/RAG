@@ -78,7 +78,21 @@ class GenerationService:
 
         data = self._parse_json(raw_text)
         if data is None:
-            return None
+            fallback_text = raw_text.strip() or "요약 생성에 실패했지만, 검색된 근거는 확인할 수 있습니다."
+            return ExpertSummaryResponse(
+                summary_text=fallback_text,
+                key_issues=[],
+                citations=[
+                    {
+                        "citation_id": chunk.citation_id,
+                        "meeting_label": chunk.meeting_label,
+                        "meeting_date": chunk.meeting_date,
+                        "speaker": chunk.speaker,
+                    }
+                    for chunk in request.retrieved_chunks
+                ],
+                generated_at=self._now(),
+            )
         if data.get("insufficient") or self._is_rejected(data.get("summary_text", "")):
             return None
 
@@ -104,7 +118,14 @@ class GenerationService:
 
         data = self._parse_json(raw_text)
         if data is None:
-            return None
+            fallback_text = raw_text.strip() or "요약 생성에 실패했지만, 검색된 근거는 확인할 수 있습니다."
+            return EasySummaryResponse(
+                decision=fallback_text,
+                reason="",
+                change="",
+                glossary=[],
+                generated_at=self._now(),
+            )
         if data.get("insufficient") or self._is_rejected(data.get("decision", "")):
             return None
 

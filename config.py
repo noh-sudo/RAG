@@ -30,15 +30,17 @@ SERVER_PORT = int(os.getenv("RAG_SERVER_PORT", "9000"))
 OLLAMA_HOST = "http://localhost:11434"
 
 # 생성 모델. 모델 교체는 이 한 줄만 수정한다 (GGUF 로딩 실패 시 대체 모델 전환용).
-LLM_MODEL = "qwen2.5:14b"
+# 현재 서버에 로컬로 설치된 모델 중 하나를 기본값으로 사용한다.
+LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gemma4:12b")
 
 # 임베딩 모델. 서버 기동 시 data/meta.json의 embed_model·dim과 대조한다 (인터페이스 정의서 §3.5).
 EMBED_MODEL = "bge-m3"
 EMBED_DIM = 1024
 
 # ── 검색 (서버 전용) ────────────────────────────────────────
-# 임계값 게이트 기준값. services/threshold_eval.py의 Day 4 실측 결과로 갱신한다.
-THRESHOLD = 0.5
+# 임계값 게이트 기준값. 현재는 너무 엄격해서 포괄적 질문도 쉽게 걸러져서
+# 실사용성 확보를 위해 낮춘 값으로 조정한다.
+THRESHOLD = 0.3
 
 # 검색 결과 기본 반환 건수 (인터페이스 정의서 §3.6)
 TOP_K_DEFAULT = 5
