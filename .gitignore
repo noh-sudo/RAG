@@ -1,7 +1,19 @@
 .venv
 .vscode
+__pycache__
+*.pyc
 .claude
 .obsidian
 .idea
 .DS_Store
 .claudian
+
+# data_pipeline 산출물 — 원본 AI Hub JSON과 ChromaDB 인덱스는 용량/재생성 가능성 때문에 제외.
+# chunks.json·meta.json은 Git에 포함한다 (역할① 완결형 가이드 §0.3).
+data/raw/
+data/chroma/
+
+tests/
+역할1_완결형_가이드.md
+
+__pycache__/
