@@ -5,27 +5,42 @@
 코드 수정 없이 이 파일만 바꿔서 접속 정보를 변경할 수 있게 한다 (VOP-004).
 """
 
+import os
+import socket
 from pathlib import Path
 
+
+def _detect_default_host() -> str:
+    """현재 머신의 실제 LAN IP를 자동으로 찾아 반환한다."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
 # ── RAG 서버 접속 주소 (클라이언트가 사용) ──────────────────────
-# 클라이언트 3대가 TCP로 접속할 서버 PC의 LAN 주소. 실제 IP로 바꿔서 쓴다.
-SERVER_HOST = "10.10.10.137"
-SERVER_PORT = 9000
+# 다른 PC에서 접속할 때는 클라이언트 쪽에서 RAG_SERVER_HOST 환경변수로 이 서버의 IP를 지정하면 된다.
+SERVER_HOST = os.getenv("RAG_SERVER_HOST", "10.10.10.137")
+SERVER_PORT = int(os.getenv("RAG_SERVER_PORT", "9000"))
 
 # ── Ollama (서버 전용) ──────────────────────────────────────
 # 서버 프로세스와 Ollama가 같은 PC에 있으므로 localhost로 접속한다.
 OLLAMA_HOST = "http://localhost:11434"
 
 # 생성 모델. 모델 교체는 이 한 줄만 수정한다 (GGUF 로딩 실패 시 대체 모델 전환용).
-LLM_MODEL = "gemma4:12b"
+# 현재 서버에 로컬로 설치된 모델 중 하나를 기본값으로 사용한다.
+LLM_MODEL = os.getenv("RAG_LLM_MODEL", "gemma4:12b")
 
 # 임베딩 모델. 서버 기동 시 data/meta.json의 embed_model·dim과 대조한다 (인터페이스 정의서 §3.5).
 EMBED_MODEL = "bge-m3"
 EMBED_DIM = 1024
 
 # ── 검색 (서버 전용) ────────────────────────────────────────
-# 임계값 게이트 기준값. services/threshold_eval.py의 Day 4 실측 결과로 갱신한다.
-THRESHOLD = 0.5
+# 임계값 게이트 기준값. 현재는 너무 엄격해서 포괄적 질문도 쉽게 걸러져서
+# 실사용성 확보를 위해 낮춘 값으로 조정한다.
+THRESHOLD = 0.3
 
 # 검색 결과 기본 반환 건수 (인터페이스 정의서 §3.6)
 TOP_K_DEFAULT = 5
