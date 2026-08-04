@@ -11,7 +11,6 @@ from typing import Iterable, List, Optional, Sequence
 import uuid
 
 from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -33,24 +32,21 @@ from common.schemas import (
     RetrievedChunk,
     SearchFilters,
     Mode,
-    ExpertSummaryResponse,
-    ModeSwitchRequest,
-    ModeSwitchResponse
+    ExpertSummaryResponse
 )
 
 SUMMARY_TAB = 0
 RAW_TAB = 1
 
-SORTS = ["관련순", "최신순"]
-CATEGORY_QUERIES = {
-    "정치/경제": "정치 경제",
-    "국방/안보/외교": "국방 안보 외교",
-    "교육/문화/통일": "교육 문화 통일",
-    "노동/사회": "노동 사회",
-}
+SORTS = ["최신순", "관련순"]
+ASSEMBLY_TERMS = ["15대", "16대", "17대", "18대", "19대", "20대", "21대"]
+AGENDAS = ["경제", "안보", "교육", "외교", "통일", "국방", "정치", "문화", "노동", "사회"]
 
-GRADIENT_TOP = QColor(232, 244, 255)      # 연한 하늘색
-GRADIENT_BOTTOM = QColor(196, 225, 250)
+def _parse_generation_no(value: Optional[str]) -> Optional[int]:
+    """'21대' 형태의 문자열을 int로 변환. None이면 그대로 None."""
+    if not value:
+        return None
+    return int(value.rstrip("대"))
 
 # 거부 응답 문구는 ③④ 소유. ②는 found=False와 top_similarity만 준다.
 NO_EVIDENCE_TEXT = (
@@ -58,6 +54,54 @@ NO_EVIDENCE_TEXT = (
     "<p style='color:#6b7280;'>대수·기간 필터를 넓히거나, 회의에서 실제로 다뤘을 만한 "
     "표현으로 바꿔 검색해 보세요.</p>"
 )
+
+
+class _StubService:
+    """②의 H2 인터페이스가 나오기 전까지 쓰는 고정 응답. Day 5 통합 때 교체한다."""
+
+    def query(self, request: RemoteQueryRequest) -> RemoteQueryResponse:
+        if "없는말" in request.query:
+            return RemoteQueryResponse(
+                session_id=request.session_id,
+                found=False,
+                top_similarity=0.21,
+                chunks=[],
+                response=None,
+                error=None,
+                search_time_ms=0,
+            )
+        return RemoteQueryResponse(
+            session_id=request.session_id,
+            found=True,
+            top_similarity=0.68,
+            chunks=[
+                RetrievedChunk(
+                    chunk_id="052147-0002",
+                    text="간병비 부담이 가구 소득의 절반을 넘는 사례가 늘고 있습니다.",
+                    dense_similarity=0.68,
+                    meeting_date="2024-09-01",
+                    meeting_label="제422회 본회의 3차",
+                    speaker="김OO 위원 → 이OO 장관",
+                    citation_id=1,
+                ),
+            ],
+            response=ExpertSummaryResponse(
+                summary_text="간병비 급여화 요구에 정부가 시범사업 확대로 답했다. "
+                             "확대 규모는 10개 지역, 시점은 내년 상반기다.[1]",
+                key_issues=["간병비 부담 완화", "시범사업 확대 시점"],
+                citations=[
+                    {
+                        "citation_id": 1,
+                        "meeting_label": "제422회 본회의 3차",
+                        "meeting_date": "2024-09-01",
+                        "speaker": "김OO 위원 → 이OO 장관",
+                    },
+                ],
+                generated_at="2024-09-01T00:00:00",
+            ),
+            error=None,
+            search_time_ms=120,
+        )
 
 class SearchWorker(QThread):
     """NetworkClient.query()를 백그라운드 스레드에서 실행한다.
@@ -78,24 +122,6 @@ class SearchWorker(QThread):
         except Exception as exc:
             self.failed.emit(str(exc))
 
-class ModeSwitchWorker(QThread):
-    """NetworkClient.switch_mode()를 백그라운드 스레드에서 실행한다."""
-
-    succeeded = Signal(object)   # ModeSwitchResponse
-    failed = Signal(str)
-
-    def __init__(self, network_client, request, parent=None):
-        super().__init__(parent)
-        self.network_client = network_client
-        self.request = request
-
-    def run(self) -> None:
-        try:
-            response = self.network_client.switch_mode(self.request)
-            self.succeeded.emit(response)
-        except Exception as exc:
-            self.failed.emit(str(exc))
-
 class ExpertPanel(QWidget):
     """시그널
         busy_changed(bool)      요청 중 여부. 셸이 모드 토글을 잠그는 데 쓴다
@@ -105,15 +131,12 @@ class ExpertPanel(QWidget):
     busy_changed = Signal(bool)
     status_message = Signal(str)
 
-    def __init__(self, network_client=None, session_id: str | None = None, parent: QWidget | None = None) -> None:
+    def __init__(self, network_client=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.network_client = network_client
-        self.session_id = session_id or str(uuid.uuid4())
-        self._last_response = None
-        
+        self.network_client = network_client or _StubService()
+        self.session_id = str(uuid.uuid4())
         self._results: List[dict] = []
         self._busy = False
-        self._selected_category = None
 
         self.layout = QVBoxLayout(self)
         self._build_search()
@@ -127,34 +150,32 @@ class ExpertPanel(QWidget):
         self.search.setClearButtonEnabled(True)
 
         self.sort = QComboBox()
+        self.sort.addItem("정렬")
         self.sort.addItems(SORTS)
+        self.assembly_term = QComboBox()
+        self.assembly_term.addItem("대수")
+        self.assembly_term.addItems(ASSEMBLY_TERMS)
+        self.agenda = QComboBox()
+        self.agenda.addItem("주제")
+        self.agenda.addItems(AGENDAS)
         self.search_button = QPushButton("검색")
 
-        self.search_layout = QHBoxLayout()
-        self.search_layout.addWidget(self.search)
-        self.search_layout.addWidget(self.search_button)        
-
-        self.category_buttons = {}
         self.filter_layout = QHBoxLayout()
-        for label in CATEGORY_QUERIES:
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.clicked.connect(lambda _, name=label: self._on_category_clicked(name))
-            self.category_buttons[label] = btn
-            self.filter_layout.addWidget(btn)
+        self.filter_layout.addWidget(self.sort)
+        self.filter_layout.addWidget(self.assembly_term)
+        self.filter_layout.addWidget(self.agenda)
+        self.filter_layout.addStretch(1)
+        self.filter_layout.addWidget(self.search_button)
 
-        self.layout.addLayout(self.search_layout)
-     
+        self.layout.addWidget(self.search)
+        self.layout.addLayout(self.filter_layout)
+
     def _build_body(self) -> None:
         self.result_layout = QVBoxLayout()
-        self.result_layout.addLayout(self.filter_layout)
-        self.result_filtering = QHBoxLayout()
         self.result_title = QLabel("검색 결과")
         self.result_list = QListWidget()
         self.result_list.setMinimumWidth(260)
-        self.result_filtering.addWidget(self.result_title)
-        self.result_filtering.addWidget(self.sort)
-        self.result_layout.addLayout(self.result_filtering)
+        self.result_layout.addWidget(self.result_title)
         self.result_layout.addWidget(self.result_list)
 
         self.content_tab = QTabWidget()
@@ -166,9 +187,16 @@ class ExpertPanel(QWidget):
         self.summary = QTextBrowser()
         self.summary.setOpenExternalLinks(False)
         self.citation_widget = CitationWidget()
+        self.save_button = QPushButton("저장")
+        self.download_button = QPushButton("다운로드")
+        self.save_layout = QHBoxLayout()
+        self.save_layout.addStretch(1)
+        self.save_layout.addWidget(self.save_button)
+        self.save_layout.addWidget(self.download_button)
         self.sum_layout.addWidget(self.summary_title)
         self.sum_layout.addWidget(self.summary)
         self.sum_layout.addWidget(self.citation_widget)
+        self.sum_layout.addLayout(self.save_layout)
 
         self.raw_page = QWidget()
         self.raw_layout = QVBoxLayout(self.raw_page)
@@ -188,14 +216,6 @@ class ExpertPanel(QWidget):
         self.layout.addLayout(self.main_layout)
         self.clear_document()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0.0, GRADIENT_TOP)
-        gradient.setColorAt(1.0, GRADIENT_BOTTOM)
-        painter.fillRect(self.rect(), gradient)
-        painter.end()
-
     def _connect(self) -> None:
         self.search.returnPressed.connect(self.run_search)
         self.search_button.clicked.connect(self.run_search)
@@ -206,15 +226,18 @@ class ExpertPanel(QWidget):
     # ------------------------------------------------------------------ 검색
     def current_request(self) -> RemoteQueryRequest:
         keyword = self.search.text().strip()
-        category_query = (
-            CATEGORY_QUERIES[self._selected_category]
-            if self._selected_category else "")
-        combined_query = f"{keyword} {category_query}".strip()
+        agenda_term = self._combo_value(self.agenda, "주제")
+        combined_query = f"{keyword} {agenda_term}".strip() if agenda_term else keyword
 
         return RemoteQueryRequest(
             session_id=self.session_id,
             query=combined_query,
-            filters=SearchFilters(),
+            filters=SearchFilters(
+                generation_no=_parse_generation_no(
+                    self._combo_value(self.assembly_term, "대수")
+                ),
+                category=None,
+            ),
             mode=Mode.EXPERT,
             top_k=5,
         )
@@ -229,9 +252,6 @@ class ExpertPanel(QWidget):
     def run_search(self) -> None:
         if self._busy:
             return
-        if not self.search.text().strip() and self._selected_category is None:
-            self.status_message.emit("검색어를 입력하거나 주제를 선택해주세요.")
-            return
         self._set_busy(True)
 
         self._worker = SearchWorker(self.network_client, self.current_request())
@@ -239,40 +259,6 @@ class ExpertPanel(QWidget):
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(lambda: self._set_busy(False))
         self._worker.start()
-
-    def on_mode_activated(self) -> None:
-        """상단 토글로 전문가모드가 활성화될 때 MainWindow가 호출한다.
-        검색을 다시 하지 않고 서버 세션 캐시로 재생성만 요청한다 (§4.5)."""
-        if self._busy or self._last_response is None:
-            return  # 아직 검색을 한 적 없으면 전환할 것이 없다
-        if not self._last_response.found:
-            return  # 근거 없음 상태는 전환해도 유지 (§4.5 분기)
-
-        self._set_busy(True)
-        request = ModeSwitchRequest(session_id=self.session_id, new_mode=Mode.EXPERT)
-
-        self._mode_worker = ModeSwitchWorker(self.network_client, request)
-        self._mode_worker.succeeded.connect(self._on_mode_switch_succeeded)
-        self._mode_worker.failed.connect(self._on_mode_switch_failed)
-        self._mode_worker.finished.connect(lambda: self._set_busy(False))
-        self._mode_worker.finished.connect(self._mode_worker.deleteLater)
-        self._mode_worker.start()
-
-    def _on_mode_switch_succeeded(self, response) -> None:
-        if response.response is None:
-            return
-        self._last_response.response = response.response
-        summary = response.response
-        citations = [Citation.from_search_result(r) for r in self._results]
-        self.summary.setHtml(summary.summary_text)
-        self.summary.verticalScrollBar().setValue(0)   
-        self.citation_widget.set_citations(citations)
-        self.status_message.emit(
-            "모드 전환 완료" + (" (캐시 재사용)" if response.cache_hit else "")
-        )
-
-    def _on_mode_switch_failed(self, error_message: str) -> None:
-        self.status_message.emit(f"모드 전환 오류: {error_message}")
 
     def _on_search_succeeded(self, response) -> None:
         self._last_response = response
@@ -320,11 +306,9 @@ class ExpertPanel(QWidget):
 
         self.summary_title.setText(chunk_id)
         self.summary.setHtml(summary.summary_text)
-        self.summary.verticalScrollBar().setValue(0)   
         self.citation_widget.set_citations(citations)
         self.raw_title.setText(f"{chunk_id} — 회의록 원문")
         self.raw.setHtml(self._build_raw_html(self._results))
-        self.raw.verticalScrollBar().setValue(0)  
         self.content_tab.setCurrentIndex(SUMMARY_TAB)
 
     def current_sort_key(self) -> str:
@@ -334,20 +318,6 @@ class ExpertPanel(QWidget):
         if not self._results:
             return
         self.set_results(self._sorted_results(self.current_sort_key()))
-
-    def _on_category_clicked(self, label: str) -> None:
-        """주제 버튼은 토글이다. 같은 버튼을 다시 누르면 해제된다."""
-        if self._busy:
-            self.category_buttons[label].setChecked(
-                self._selected_category == label)
-            return
-
-        self._selected_category = (
-            None if self._selected_category == label else label)
-        for name, btn in self.category_buttons.items():
-            btn.setChecked(name == self._selected_category)
-
-        self.run_search()
 
     @staticmethod
     def _build_raw_html(results: Sequence[RetrievedChunk]) -> str:
@@ -376,10 +346,10 @@ class ExpertPanel(QWidget):
     def _set_busy(self, busy: bool) -> None:
         """요청 중 검색·저장 버튼을 잠근다. 연타로 중복 요청이 쌓이지 않게."""
         self._busy = busy
-        for widget in (self.search, self.search_button, self.sort, self.result_list):
+        for widget in (self.search, self.search_button, self.sort,
+                       self.assembly_term, self.agenda, self.result_list,
+                       self.save_button, self.download_button):
             widget.setEnabled(not busy)
-        for btn in self.category_buttons.values():
-            btn.setEnabled(not busy)
         self.busy_changed.emit(busy)
 
     def _on_result_selected(self, current: Optional[QListWidgetItem], _prev=None) -> None:

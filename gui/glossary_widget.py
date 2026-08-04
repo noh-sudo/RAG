@@ -37,6 +37,7 @@ class GlossaryItem(QFrame):
         self.setStyleSheet("""
             QFrame {
                 background-color: #F0F5FF;
+                border: 2px solid #0052CC;
                 border-radius: 8px;
             }
         """)
@@ -117,8 +118,9 @@ class GlossaryWidget(QWidget):
         # 스크롤 영역 초기화
         self._clear_scroll_layout()
         self.current_items = []
+
         if not glossary_items:
-            self._add_empty_label()
+            self.scroll_layout.addWidget(self.empty_label)
             return
 
         # 각 용어 카드 추가
@@ -170,23 +172,11 @@ class GlossaryWidget(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-    def _add_empty_label(self):
-        """빈 상태 안내 라벨을 새로 만들어 추가한다.
-        _clear_scroll_layout()이 deleteLater()로 기존 라벨을 파괴하므로,
-        같은 객체를 재사용하면 RuntimeError(C++ object already deleted)가 발생한다."""
-        self.empty_label = QLabel("(용어 설명이 없습니다)")
-        self.empty_label.setStyleSheet("color: #999999;")
-        empty_font = QFont()
-        empty_font.setPointSize(11)
-        empty_font.setItalic(True)
-        self.empty_label.setFont(empty_font)
-        self.scroll_layout.addWidget(self.empty_label)
-
     def clear(self):
         """용어 풀이 내용 초기화"""
         self._clear_scroll_layout()
         self.current_items = []
-        self._add_empty_label()
+        self.scroll_layout.addWidget(self.empty_label)
 
     def get_cache_stats(self) -> dict:
         """캐시 통계 반환"""
