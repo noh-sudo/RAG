@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit
 )
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtCore import Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QColor, QLinearGradient, QPainter
 
 import uuid
@@ -100,7 +100,7 @@ class EasyPanel(QWidget):
         """UI 초기화"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        main_layout.setSpacing(8)
 
         # ────── 1. 헤더 타이틀 ──────────
         self.search = QLineEdit()
@@ -118,19 +118,18 @@ class EasyPanel(QWidget):
         header_layout = QVBoxLayout()
         title_label = QLabel("요약설명 쉬운모드는 고령자 친화적인 화면입니다.")
         title_font = QFont()
-        title_font.setPointSize(18)
+        title_font.setPointSize(16)
         title_font.setBold(True)
         title_label.setFont(title_font)
         title_label.setStyleSheet("color: #333333;")
         header_layout.addWidget(title_label)
         header_layout.addLayout(self.search_layout)
-        header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
         # ────── 2. 카테고리 버튼 섹션 ──────────
         category_label = QLabel("주제 선택하기")
         category_font = QFont()
-        category_font.setPointSize(14)
+        category_font.setPointSize(12)
         category_font.setBold(True)
         category_label.setFont(category_font)
         main_layout.addWidget(category_label)
@@ -149,15 +148,15 @@ class EasyPanel(QWidget):
         # ────── 3. 3문답 요약 섹션 ──────────
         summary_label = QLabel("요약 내용")
         summary_font = QFont()
-        summary_font.setPointSize(14)
+        summary_font.setPointSize(12)
         summary_font.setBold(True)
         summary_label.setFont(summary_font)
         main_layout.addWidget(summary_label)
 
         # 스크롤 영역
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(
             "QScrollArea { border: 1px solid #cccccc; background-color: white; }"
         )
 
@@ -169,7 +168,7 @@ class EasyPanel(QWidget):
         # 결정사항
         decision_title = QLabel("📌 무엇을 결정했나요?")
         decision_title_font = QFont()
-        decision_title_font.setPointSize(13)
+        decision_title_font.setPointSize(12)
         decision_title_font.setBold(True)
         decision_title.setFont(decision_title_font)
         decision_title.setStyleSheet("color: #0052CC;")
@@ -182,13 +181,13 @@ class EasyPanel(QWidget):
         decision_font.setPointSize(12)
         decision_font.setBold(True)
         self.decision_text.setFont(decision_font)
-        self.decision_text.setMinimumHeight(60)
+        self.decision_text.setMinimumHeight(40)
         summary_layout.addWidget(self.decision_text)
 
         # 이유
         reason_title = QLabel("💭 왜 이런 이야기를 했나요?")
         reason_title_font = QFont()
-        reason_title_font.setPointSize(13)
+        reason_title_font.setPointSize(12)
         reason_title_font.setBold(True)
         reason_title.setFont(reason_title_font)
         reason_title.setStyleSheet("color: #0052CC;")
@@ -201,13 +200,13 @@ class EasyPanel(QWidget):
         reason_font.setPointSize(12)
         reason_font.setBold(True)
         self.reason_text.setFont(reason_font)
-        self.reason_text.setMinimumHeight(60)
+        self.reason_text.setMinimumHeight(40)
         summary_layout.addWidget(self.reason_text)
 
         # 변화
         change_title = QLabel("🔄 앞으로 무엇이 바뀌나요?")
         change_title_font = QFont()
-        change_title_font.setPointSize(13)
+        change_title_font.setPointSize(12)
         change_title_font.setBold(True)
         change_title.setFont(change_title_font)
         change_title.setStyleSheet("color: #0052CC;")
@@ -220,17 +219,17 @@ class EasyPanel(QWidget):
         change_font.setPointSize(12)
         change_font.setBold(True)
         self.change_text.setFont(change_font)
-        self.change_text.setMinimumHeight(60)
+        self.change_text.setMinimumHeight(40)
         summary_layout.addWidget(self.change_text)
 
-        summary_layout.addStretch()
-        scroll_area.setWidget(summary_widget)
-        main_layout.addWidget(scroll_area, 1)
+        #summary_layout.addStretch()
+        self.scroll_area.setWidget(summary_widget)
+        main_layout.addWidget(self.scroll_area, 1)
 
         # ────── 4. 용어 풀이 위젯 ──────────
         glossary_label = QLabel("어려운 용어 설명")
         glossary_font = QFont()
-        glossary_font.setPointSize(14)
+        glossary_font.setPointSize(12)
         glossary_font.setBold(True)
         glossary_label.setFont(glossary_font)
         main_layout.addWidget(glossary_label)
@@ -251,8 +250,8 @@ class EasyPanel(QWidget):
         """카테고리 버튼 생성"""
         btn = QPushButton(category_name)
         btn.setCheckable(True)
-        btn.setMinimumHeight(40)
-        btn.setMinimumWidth(80)
+        btn.setMinimumHeight(32)
+        btn.setMinimumWidth(60)
 
         # 폰트 설정 - 큰 글씨, 굵음
         btn_font = QFont()
@@ -275,6 +274,9 @@ class EasyPanel(QWidget):
             }
             QPushButton:pressed {
                 background-color: #003399;
+            }
+            QPushButton:checked {
+                background-color: #001A4D;
             }
         """)
 
@@ -386,6 +388,12 @@ class EasyPanel(QWidget):
         # 이 메서드는 추후 메인 윈도우와의 신호 연결을 위함
         pass
 
+    def _scroll_to_top(self):
+        bar = self.scroll_area.verticalScrollBar()
+        print(f"[DEBUG] before: value={bar.value()}, min={bar.minimum()}, max={bar.maximum()}")
+        bar.setValue(bar.minimum())
+        print(f"[DEBUG] after: value={bar.value()}")
+
     def display_summary(self, response: EasySummaryResponse):
         """요약 결과 표시"""
         self.current_response = response
@@ -400,7 +408,7 @@ class EasyPanel(QWidget):
         self.change_text.setText(response.change)
 
         # 용어 풀이 표시
-        if response.glossary:
+        if response.glossary:       
             glossary_items = [
                 {"term": item.get("term", ""), "definition": item.get("definition", "")}
                 for item in response.glossary
@@ -408,6 +416,8 @@ class EasyPanel(QWidget):
             self.glossary_widget.display_glossary(glossary_items)
         else:
             self.glossary_widget.clear()
+
+        QTimer.singleShot(50, self._scroll_to_top) 
 
     def display_no_evidence(self):
         """근거 없음 상태 표시"""

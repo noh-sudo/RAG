@@ -139,7 +139,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.network_client = network_client   # ← 추가
         self.setWindowTitle("국민의 소리")
-        self.resize(1100, 700)
+        self.resize(1100, 850)
         self.session_id = str(uuid.uuid4())
 
         self.expert_panel = ExpertPanel(network_client=network_client, session_id=self.session_id)

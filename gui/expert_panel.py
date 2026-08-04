@@ -265,6 +265,7 @@ class ExpertPanel(QWidget):
         summary = response.response
         citations = [Citation.from_search_result(r) for r in self._results]
         self.summary.setHtml(summary.summary_text)
+        self.summary.verticalScrollBar().setValue(0)   
         self.citation_widget.set_citations(citations)
         self.status_message.emit(
             "모드 전환 완료" + (" (캐시 재사용)" if response.cache_hit else "")
@@ -319,9 +320,11 @@ class ExpertPanel(QWidget):
 
         self.summary_title.setText(chunk_id)
         self.summary.setHtml(summary.summary_text)
+        self.summary.verticalScrollBar().setValue(0)   
         self.citation_widget.set_citations(citations)
         self.raw_title.setText(f"{chunk_id} — 회의록 원문")
         self.raw.setHtml(self._build_raw_html(self._results))
+        self.raw.verticalScrollBar().setValue(0)  
         self.content_tab.setCurrentIndex(SUMMARY_TAB)
 
     def current_sort_key(self) -> str:

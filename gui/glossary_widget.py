@@ -37,7 +37,6 @@ class GlossaryItem(QFrame):
         self.setStyleSheet("""
             QFrame {
                 background-color: #F0F5FF;
-                border: 2px solid #0052CC;
                 border-radius: 8px;
             }
         """)
