@@ -53,10 +53,46 @@ _EASY_SYSTEM_PROMPT = (
     '발췌만으로 답할 수 없으면 "insufficient"를 true로 하고 decision에 그 사실을 적어라.'
 )
 
+_EXPERT_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary_text": {"type": "string"},
+        "key_issues": {"type": "array", "items": {"type": "string"}},
+        "insufficient": {"type": "boolean"},
+    },
+    "required": ["summary_text", "key_issues", "insufficient"],
+}
+
+_EASY_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {"type": "string"},
+        "reason": {"type": "string"},
+        "change": {"type": "string"},
+        "glossary": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string"},
+                    "definition": {"type": "string"},
+                },
+                "required": ["term", "definition"],
+            },
+        },
+        "insufficient": {"type": "boolean"},
+    },
+    "required": ["decision", "reason", "change", "glossary", "insufficient"],
+}
+
+_ERR_LLM_EMPTY_RESPONSE = "ERR_LLM_EMPTY_RESPONSE"
+_KEEP_ALIVE = "30m"  # 기본 5분보다 길게 유지해 요청 사이 유휴 시간에 모델이 내려가지 않게 한다.
+
 
 class GenerationService:
     def __init__(self) -> None:
         self._client = ollama.Client(host=config.OLLAMA_HOST, timeout=_TIMEOUT_SECONDS)
+        self.last_error: str | None = None
 
     def generate(
         self, request: GenerationRequest
@@ -67,14 +103,27 @@ class GenerationService:
         모델이 "insufficient": true를 반환하거나, JSON 파싱에 실패하면 None을
         반환한다. 호출측(server.py/mode_manager.py)은 이를 found=False로 강등
         처리해야 한다 — 그렇지 않으면 거부 문구가 정상 요약처럼 화면에 렌더링된다.
+        None을 반환한 이유는 self.last_error(§4.4 RemoteQueryResponse.error용)에
+        남는다 — 이유가 없으면(거부/insufficient) None으로 둔다.
         """
+        self.last_error = None
         if request.mode == Mode.EXPERT:
             return self._generate_expert(request)
         return self._generate_easy(request)
 
+    def warm_up(self) -> None:
+        """서버 기동 시 한 번 호출해 첫 실제 요청 전에 모델을 미리 로드해둔다."""
+        self._client.generate(model=config.LLM_MODEL, keep_alive=_KEEP_ALIVE)
+
     def _generate_expert(self, request: GenerationRequest) -> ExpertSummaryResponse | None:
         prompt = self._build_prompt(request.query, request.retrieved_chunks)
-        raw_text = self._call_ollama(_EXPERT_SYSTEM_PROMPT, prompt, _EXPERT_NUM_PREDICT)
+        raw_text = self._call_ollama(
+            _EXPERT_SYSTEM_PROMPT, prompt, _EXPERT_NUM_PREDICT, format=_EXPERT_JSON_SCHEMA
+        )
+
+        if not raw_text.strip():
+            self.last_error = _ERR_LLM_EMPTY_RESPONSE
+            return None
 
         data = self._parse_json(raw_text)
         if data is None:
@@ -114,7 +163,13 @@ class GenerationService:
 
     def _generate_easy(self, request: GenerationRequest) -> EasySummaryResponse | None:
         prompt = self._build_prompt(request.query, request.retrieved_chunks)
-        raw_text = self._call_ollama(_EASY_SYSTEM_PROMPT, prompt, _EASY_NUM_PREDICT)
+        raw_text = self._call_ollama(
+            _EASY_SYSTEM_PROMPT, prompt, _EASY_NUM_PREDICT, format=_EASY_JSON_SCHEMA
+        )
+
+        if not raw_text.strip():
+            self.last_error = _ERR_LLM_EMPTY_RESPONSE
+            return None
 
         data = self._parse_json(raw_text)
         if data is None:
@@ -144,13 +199,18 @@ class GenerationService:
         ]
         return f"질문: {query}\n\n발췌:\n" + "\n".join(excerpt_lines)
 
-    def _call_ollama(self, system_prompt: str, user_prompt: str, num_predict: int) -> str:
+    def _call_ollama(
+        self, system_prompt: str, user_prompt: str, num_predict: int, format: dict | None = None
+    ) -> str:
         response = self._client.generate(
             model=config.LLM_MODEL,
             system=system_prompt,
             prompt=user_prompt,
             options={"num_predict": num_predict},
             stream=False,
+            think=False,
+            format=format,
+            keep_alive=_KEEP_ALIVE,
         )
         return response["response"]
 

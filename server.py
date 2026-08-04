@@ -199,6 +199,7 @@ class ClientHandler(threading.Thread):
         found = search_result.found
         chunks = search_result.chunks
         summary_response = None
+        generation_error = None
 
         if found:
             summary_response = self._generation.generate(
@@ -212,7 +213,7 @@ class ClientHandler(threading.Thread):
             if summary_response is None:
                 # 생성 실패 시에도 근거 청크는 유지하고 found=True로 둔다.
                 # 이렇게 해야 포괄적 질문에서도 검색 결과를 확인할 수 있다.
-                summary_response = None
+                generation_error = self._generation.last_error
 
         self._mode_manager.remember_search(
             session_id=request.session_id,
@@ -230,7 +231,7 @@ class ClientHandler(threading.Thread):
             top_similarity=search_result.top_similarity,
             chunks=chunks,
             response=summary_response,
-            error=None,
+            error=generation_error,
             search_time_ms=search_time_ms,
         )
 
@@ -245,6 +246,12 @@ def main() -> None:
     retrieval = RetrievalService()
     generation = GenerationService()
     mode_manager = ModeManager(retrieval, generation)
+
+    try:
+        generation.warm_up()
+        print(f"[server.py] LLM 모델 예열 완료 ({config.LLM_MODEL})")
+    except Exception as exc:
+        print(f"[server.py] LLM 모델 예열 실패 (첫 요청이 느릴 수 있음): {exc}")
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
