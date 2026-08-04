@@ -42,22 +42,15 @@ SUMMARY_TAB = 0
 RAW_TAB = 1
 
 SORTS = ["관련순", "최신순"]
-ASSEMBLY_TERMS = ["15대", "16대", "17대", "18대", "19대", "20대", "21대"]
-AGENDAS = [
-    "정치",                          # 나라 살림
-    "경제", "노동",                  # 물가와 일자리
-    "외교", "통일", "안보", "국방",   # 안보와 통일
-    "교육", "사회", "문화",          # 교육·복지
-]
+CATEGORY_QUERIES = {
+    "정치/경제": "정치 경제",
+    "국방/안보/외교": "국방 안보 외교",
+    "교육/문화/통일": "교육 문화 통일",
+    "노동/사회": "노동 사회",
+}
 
 GRADIENT_TOP = QColor(232, 244, 255)      # 연한 하늘색
 GRADIENT_BOTTOM = QColor(196, 225, 250)
-
-def _parse_generation_no(value: Optional[str]) -> Optional[int]:
-    """'21대' 형태의 문자열을 int로 변환. None이면 그대로 None."""
-    if not value:
-        return None
-    return int(value.rstrip("대"))
 
 # 거부 응답 문구는 ③④ 소유. ②는 found=False와 top_similarity만 준다.
 NO_EVIDENCE_TEXT = (
@@ -120,6 +113,7 @@ class ExpertPanel(QWidget):
         
         self._results: List[dict] = []
         self._busy = False
+        self._selected_category = None
 
         self.layout = QVBoxLayout(self)
         self._build_search()
@@ -134,30 +128,33 @@ class ExpertPanel(QWidget):
 
         self.sort = QComboBox()
         self.sort.addItems(SORTS)
-        self.assembly_term = QComboBox()
-        self.assembly_term.addItem("전체 대수")
-        self.assembly_term.addItems(ASSEMBLY_TERMS)
-        self.agenda = QComboBox()
-        self.agenda.addItem("전체 주제")
-        self.agenda.addItems(AGENDAS)
         self.search_button = QPushButton("검색")
 
+        self.search_layout = QHBoxLayout()
+        self.search_layout.addWidget(self.search)
+        self.search_layout.addWidget(self.search_button)        
+
+        self.category_buttons = {}
         self.filter_layout = QHBoxLayout()
-        self.filter_layout.addWidget(self.sort)
-        self.filter_layout.addWidget(self.assembly_term)
-        self.filter_layout.addWidget(self.agenda)
-        self.filter_layout.addStretch(1)
-        self.filter_layout.addWidget(self.search_button)
+        for label in CATEGORY_QUERIES:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _, name=label: self._on_category_clicked(name))
+            self.category_buttons[label] = btn
+            self.filter_layout.addWidget(btn)
 
-        self.layout.addWidget(self.search)
-        self.layout.addLayout(self.filter_layout)
-
+        self.layout.addLayout(self.search_layout)
+     
     def _build_body(self) -> None:
         self.result_layout = QVBoxLayout()
+        self.result_layout.addLayout(self.filter_layout)
+        self.result_filtering = QHBoxLayout()
         self.result_title = QLabel("검색 결과")
         self.result_list = QListWidget()
         self.result_list.setMinimumWidth(260)
-        self.result_layout.addWidget(self.result_title)
+        self.result_filtering.addWidget(self.result_title)
+        self.result_filtering.addWidget(self.sort)
+        self.result_layout.addLayout(self.result_filtering)
         self.result_layout.addWidget(self.result_list)
 
         self.content_tab = QTabWidget()
@@ -209,18 +206,15 @@ class ExpertPanel(QWidget):
     # ------------------------------------------------------------------ 검색
     def current_request(self) -> RemoteQueryRequest:
         keyword = self.search.text().strip()
-        agenda_term = self._combo_value(self.agenda, "전체 주제")
-        combined_query = f"{keyword} {agenda_term}".strip() if agenda_term else keyword
+        category_query = (
+            CATEGORY_QUERIES[self._selected_category]
+            if self._selected_category else "")
+        combined_query = f"{keyword} {category_query}".strip()
 
         return RemoteQueryRequest(
             session_id=self.session_id,
             query=combined_query,
-            filters=SearchFilters(
-                generation_no=_parse_generation_no(
-                    self._combo_value(self.assembly_term, "전체 대수")
-                ),
-                category=None,
-            ),
+            filters=SearchFilters(),
             mode=Mode.EXPERT,
             top_k=5,
         )
@@ -234,6 +228,9 @@ class ExpertPanel(QWidget):
 
     def run_search(self) -> None:
         if self._busy:
+            return
+        if not self.search.text().strip() and self._selected_category is None:
+            self.status_message.emit("검색어를 입력하거나 주제를 선택해주세요.")
             return
         self._set_busy(True)
 
@@ -335,6 +332,20 @@ class ExpertPanel(QWidget):
             return
         self.set_results(self._sorted_results(self.current_sort_key()))
 
+    def _on_category_clicked(self, label: str) -> None:
+        """주제 버튼은 토글이다. 같은 버튼을 다시 누르면 해제된다."""
+        if self._busy:
+            self.category_buttons[label].setChecked(
+                self._selected_category == label)
+            return
+
+        self._selected_category = (
+            None if self._selected_category == label else label)
+        for name, btn in self.category_buttons.items():
+            btn.setChecked(name == self._selected_category)
+
+        self.run_search()
+
     @staticmethod
     def _build_raw_html(results: Sequence[RetrievedChunk]) -> str:
         """각주 클릭으로 점프할 앵커를 심어 원문을 만든다."""
@@ -362,9 +373,10 @@ class ExpertPanel(QWidget):
     def _set_busy(self, busy: bool) -> None:
         """요청 중 검색·저장 버튼을 잠근다. 연타로 중복 요청이 쌓이지 않게."""
         self._busy = busy
-        for widget in (self.search, self.search_button, self.sort,
-                       self.assembly_term, self.agenda, self.result_list):
+        for widget in (self.search, self.search_button, self.sort, self.result_list):
             widget.setEnabled(not busy)
+        for btn in self.category_buttons.values():
+            btn.setEnabled(not busy)
         self.busy_changed.emit(busy)
 
     def _on_result_selected(self, current: Optional[QListWidgetItem], _prev=None) -> None:

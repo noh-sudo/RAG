@@ -11,7 +11,8 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QScrollArea
+    QPushButton, QLabel, QScrollArea,
+    QLineEdit
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Signal, QThread
@@ -81,25 +82,18 @@ class EasyPanel(QWidget):
 
     # 카테고리 매핑
     CATEGORY_MAP = {
-        "나라 살림": "cat_politics",
-        "물가와 일자리": "cat_economy",
-        "안보와 통일": "cat_diplomacy",
-        "교육·복지": "cat_society"
-    }
-
-    CATEGORY_QUERY = {
-        "나라 살림": "정치",
-        "물가와 일자리": "경제",
-        "안보와 통일": "외교",
-        "교육·복지": "사회",
-    }
-
+    "정치/경제": "정치 경제",
+    "국방/안보/외교": "국방 안보 외교",
+    "교육/문화/통일": "교육 문화 통일",
+    "노동/사회": "노동 사회",
+}
     def __init__(self, network_client=None, session_id: str | None = None, parent=None):
         super().__init__(parent)
         self.network_client = network_client
         self.session_id = session_id or "easy_mode"
         self.current_response = None
         self._busy = False
+        self._selected_category = None
         self.init_ui()
 
     def init_ui(self):
@@ -109,14 +103,27 @@ class EasyPanel(QWidget):
         main_layout.setSpacing(20)
 
         # ────── 1. 헤더 타이틀 ──────────
-        header_layout = QHBoxLayout()
-        title_label = QLabel("요약설명 쉬운모드")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("궁금한 안건이나 발언을 검색하세요")
+        self.search.setClearButtonEnabled(True)
+
+        self.search_button = QPushButton("검색")
+        self.search_layout = QHBoxLayout()
+        self.search_layout.addWidget(self.search)
+        self.search_layout.addWidget(self.search_button) 
+
+        self.search.returnPressed.connect(self.run_search)
+        self.search_button.clicked.connect(self.run_search)
+
+        header_layout = QVBoxLayout()
+        title_label = QLabel("요약설명 쉬운모드는 고령자 친화적인 화면입니다.")
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
         title_label.setFont(title_font)
         title_label.setStyleSheet("color: #333333;")
         header_layout.addWidget(title_label)
+        header_layout.addLayout(self.search_layout)
         header_layout.addStretch()
         main_layout.addLayout(header_layout)
 
@@ -237,12 +244,15 @@ class EasyPanel(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.enable_buttons(not busy)
+        self.search.setEnabled(not busy)
+        self.search_button.setEnabled(not busy)
 
     def _create_category_button(self, category_name: str) -> QPushButton:
         """카테고리 버튼 생성"""
         btn = QPushButton(category_name)
-        btn.setMinimumHeight(60)
-        btn.setMinimumWidth(120)
+        btn.setCheckable(True)
+        btn.setMinimumHeight(40)
+        btn.setMinimumWidth(80)
 
         # 폰트 설정 - 큰 글씨, 굵음
         btn_font = QFont()
@@ -282,28 +292,50 @@ class EasyPanel(QWidget):
         painter.end()
 
     def _on_category_clicked(self, category_name: str):
-        """카테고리 버튼 클릭 핸들러"""
+        """주제 버튼은 토글이다. 같은 버튼을 다시 누르면 해제된다."""
+        if self._busy:
+            self.category_buttons[category_name].setChecked(
+                self._selected_category == category_name)
+            return
+
+        self._selected_category = (
+            None if self._selected_category == category_name else category_name)
+        for name, btn in self.category_buttons.items():
+            btn.setChecked(name == self._selected_category)
+
+        self.run_search()
+
+    def current_request(self) -> RemoteQueryRequest:
+        keyword = self.search.text().strip()
+        category_query = (
+            self.CATEGORY_MAP[self._selected_category]
+            if self._selected_category else "")
+        combined_query = f"{keyword} {category_query}".strip()
+
+        return RemoteQueryRequest(
+            session_id=self.session_id,
+            query=combined_query,
+            filters=SearchFilters(),
+            mode=Mode.EASY,
+            top_k=5,
+        )
+
+    def run_search(self) -> None:
         if self._busy:
             return
-        category_filter = self.CATEGORY_MAP[category_name]
-        filters = SearchFilters(category=category_filter)
-        request = RemoteQueryRequest(
-            session_id=self.session_id,
-            query=self.CATEGORY_QUERY[category_name],
-            filters=filters,
-            mode=Mode.EASY,
-            top_k=5
-        )
+        if not self.search.text().strip() and self._selected_category is None:
+            self.status_message.emit("검색어를 입력하거나 주제를 선택해주세요.")
+            return
 
         self._set_busy(True)
         self.busy_changed.emit(True)
 
-        self._worker = SearchWorker(self.network_client, request)
+        self._worker = SearchWorker(self.network_client, self.current_request())
         self._worker.succeeded.connect(self._on_search_succeeded)
         self._worker.failed.connect(self._on_search_failed)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.start()
-
+    
     def on_mode_activated(self) -> None:
         """상단 토글로 쉬운모드가 활성화될 때 MainWindow가 호출한다.
         검색을 다시 하지 않고 서버 세션 캐시로 재생성만 요청한다 (§4.5)."""
