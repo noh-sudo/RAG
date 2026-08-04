@@ -13,4 +13,7 @@ __pycache__
 data/raw/
 data/chroma/
 
+tests/
+역할1_완결형_가이드.md
+
 __pycache__/
