@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Signal, QThread
+from PySide6.QtGui import QFont, QColor, QLinearGradient, QPainter
+
 import uuid
 
 from common.schemas import (
@@ -28,6 +30,9 @@ from common.schemas import (
     ModeSwitchResponse
 )
 from gui.glossary_widget import GlossaryWidget
+
+GRADIENT_TOP = QColor(245, 236, 255)      # 연한 보라색
+GRADIENT_BOTTOM = QColor(220, 198, 245)
 
 class ModeSwitchWorker(QThread):
     """NetworkClient.switch_mode()를 백그라운드 스레드에서 실행한다."""
@@ -82,6 +87,13 @@ class EasyPanel(QWidget):
         "교육·복지": "cat_society"
     }
 
+    CATEGORY_QUERY = {
+        "나라 살림": "정치",
+        "물가와 일자리": "경제",
+        "안보와 통일": "외교",
+        "교육·복지": "사회",
+    }
+
     def __init__(self, network_client=None, session_id: str | None = None, parent=None):
         super().__init__(parent)
         self.network_client = network_client
@@ -95,7 +107,6 @@ class EasyPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
-        self.setStyleSheet("background-color: white;")
 
         # ────── 1. 헤더 타이틀 ──────────
         header_layout = QHBoxLayout()
@@ -262,6 +273,14 @@ class EasyPanel(QWidget):
         )
         return btn
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, GRADIENT_TOP)
+        gradient.setColorAt(1.0, GRADIENT_BOTTOM)
+        painter.fillRect(self.rect(), gradient)
+        painter.end()
+
     def _on_category_clicked(self, category_name: str):
         """카테고리 버튼 클릭 핸들러"""
         if self._busy:
@@ -270,7 +289,7 @@ class EasyPanel(QWidget):
         filters = SearchFilters(category=category_filter)
         request = RemoteQueryRequest(
             session_id=self.session_id,
-            query="",
+            query=self.CATEGORY_QUERY[category_name],
             filters=filters,
             mode=Mode.EASY,
             top_k=5

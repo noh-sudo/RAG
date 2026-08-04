@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 
@@ -20,7 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtCore import Signal, QThread, Qt
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from common.schemas import (
     ModeSwitchRequest, ModeSwitchResponse, Mode,
     ExpertSummaryResponse, EasySummaryResponse,
@@ -28,9 +30,109 @@ from common.schemas import (
 from gui.easy_panel import EasyPanel
 from gui.expert_panel import ExpertPanel
 
-EXPERT_MODE = 0
-EASY_MODE = 1
+LANDING_MODE = 0
+EXPERT_MODE = 1
+EASY_MODE = 2
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LANDING_IMAGE_PATH = os.path.join(BASE_DIR, "assembly_background.jpg")
+
+MAIN_BUTTON_STYLE = """
+QPushButton {
+    background-color: #1a56db;
+    color: white;
+    font-size: 22px;
+    font-weight: bold;
+    border-radius: 12px;
+    padding: 22px 50px;
+    border: none;
+}
+QPushButton:hover { background-color: #1e40af; }
+QPushButton:pressed { background-color: #163a91; }
+"""
+
+MODE_BTN_ACTIVE = """
+QPushButton {
+    background-color: #1a56db;
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 6px 16px;
+    border: none;
+}
+"""
+
+MODE_BTN_INACTIVE = """
+QPushButton {
+    background-color: #e5e7eb;
+    color: #333333;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 6px 16px;
+    border: none;
+}
+QPushButton:hover { background-color: #d1d5db; }
+"""
+
+class LandingPage(QWidget):
+    """첫 화면. 버튼을 누르면 시그널만 내보내고, 전환은 MainWindow가 판단한다."""
+
+    expert_requested = Signal()
+    easy_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = QPixmap(LANDING_IMAGE_PATH)
+        if self._pixmap.isNull():
+            print(f"[경고] 배경 이미지를 불러오지 못했다: {LANDING_IMAGE_PATH}")
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(40)
+
+        title = QLabel("국민의 소리")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: white; font-size: 40px; font-weight: bold;")
+        layout.addWidget(title)
+
+        subtitle = QLabel("원하시는 화면을 선택해 주세요")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("color: white; font-size: 16px;")
+        layout.addWidget(subtitle)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(60)
+        btn_row.setAlignment(Qt.AlignCenter)
+
+        expert_btn = QPushButton("전문가모드")
+        expert_btn.setStyleSheet(MAIN_BUTTON_STYLE)
+        expert_btn.setCursor(Qt.PointingHandCursor)
+        expert_btn.clicked.connect(self.expert_requested.emit)
+
+        easy_btn = QPushButton("쉬운모드")
+        easy_btn.setStyleSheet(MAIN_BUTTON_STYLE)
+        easy_btn.setCursor(Qt.PointingHandCursor)
+        easy_btn.clicked.connect(self.easy_requested.emit)
+
+        btn_row.addWidget(expert_btn)
+        btn_row.addWidget(easy_btn)
+        layout.addLayout(btn_row)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        if not self._pixmap.isNull():
+            scaled = self._pixmap.scaled(
+                self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            crop_x = max(0, (scaled.width() - self.width()) // 2)
+            crop_y = max(0, (scaled.height() - self.height()) // 2)
+            painter.drawPixmap(0, 0, scaled, crop_x, crop_y, self.width(), self.height())
+        else:
+            painter.fillRect(self.rect(), QColor(50, 60, 70))
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 90))
+        painter.end()
 
 class MainWindow(QMainWindow):
     def __init__(self, network_client=None, parent: QWidget | None = None) -> None:
@@ -43,9 +145,15 @@ class MainWindow(QMainWindow):
         self.expert_panel = ExpertPanel(network_client=network_client, session_id=self.session_id)
         self.easy_panel = EasyPanel(network_client=network_client, session_id=self.session_id)
 
+        self.landing_page = LandingPage()
+        self.landing_page.expert_requested.connect(lambda: self.set_mode(EXPERT_MODE))
+        self.landing_page.easy_requested.connect(lambda: self.set_mode(EASY_MODE))
+
         self.mode_change = QStackedWidget()
-        self.mode_change.addWidget(self.expert_panel)  # EXPERT_MODE
-        self.mode_change.addWidget(self.easy_panel)    # EASY_MODE
+        self.mode_change.addWidget(self.landing_page)   # LANDING_MODE = 0
+        self.mode_change.addWidget(self.expert_panel)   # EXPERT_MODE = 1
+        self.mode_change.addWidget(self.easy_panel)     # EASY_MODE = 2
+        self.mode_change.setCurrentIndex(LANDING_MODE)  # 처음엔 랜딩 화면
 
         root = QWidget()
         self.layout = QVBoxLayout(root)
@@ -56,7 +164,14 @@ class MainWindow(QMainWindow):
         self.easy_button = QPushButton("쉬운모드")
         for button in (self.expert_button, self.easy_button):
             button.setCheckable(True)
-        self.expert_button.setChecked(True)
+        self.expert_button.setChecked(False)
+
+        self.expert_button.setStyleSheet(MODE_BTN_INACTIVE)
+        self.easy_button.setStyleSheet(MODE_BTN_INACTIVE)
+
+        self.title_label.setVisible(False)
+        self.expert_button.setVisible(False)
+        self.easy_button.setVisible(False)
 
         self.title_layout = QHBoxLayout()
         self.title_layout.addWidget(self.title_label)
@@ -78,10 +193,21 @@ class MainWindow(QMainWindow):
 
     def set_mode(self, mode: int) -> None:
         """모드 전환은 스택 인덱스 변경뿐. 패널을 다시 만들지 않는다."""
+        is_landing = (mode == LANDING_MODE)
+        self.title_label.setVisible(not is_landing)
+        self.expert_button.setVisible(not is_landing)
+        self.easy_button.setVisible(not is_landing)
+
         self.expert_button.setChecked(mode == EXPERT_MODE)
         self.easy_button.setChecked(mode == EASY_MODE)
+        self.expert_button.setStyleSheet(
+            MODE_BTN_ACTIVE if mode == EXPERT_MODE else MODE_BTN_INACTIVE)
+        self.easy_button.setStyleSheet(
+            MODE_BTN_ACTIVE if mode == EASY_MODE else MODE_BTN_INACTIVE)
         self.mode_change.setCurrentIndex(mode)
 
+        if is_landing:
+            return
         active_panel = self.expert_panel if mode == EXPERT_MODE else self.easy_panel
         active_panel.on_mode_activated()
 

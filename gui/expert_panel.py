@@ -11,6 +11,7 @@ from typing import Iterable, List, Optional, Sequence
 import uuid
 
 from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -48,6 +49,9 @@ AGENDAS = [
     "외교", "통일", "안보", "국방",   # 안보와 통일
     "교육", "사회", "문화",          # 교육·복지
 ]
+
+GRADIENT_TOP = QColor(232, 244, 255)      # 연한 하늘색
+GRADIENT_BOTTOM = QColor(196, 225, 250)
 
 def _parse_generation_no(value: Optional[str]) -> Optional[int]:
     """'21대' 형태의 문자열을 int로 변환. None이면 그대로 None."""
@@ -112,6 +116,7 @@ class ExpertPanel(QWidget):
         super().__init__(parent)
         self.network_client = network_client
         self.session_id = session_id or str(uuid.uuid4())
+        self._last_response = None
         
         self._results: List[dict] = []
         self._busy = False
@@ -164,16 +169,9 @@ class ExpertPanel(QWidget):
         self.summary = QTextBrowser()
         self.summary.setOpenExternalLinks(False)
         self.citation_widget = CitationWidget()
-        self.save_button = QPushButton("저장")
-        self.download_button = QPushButton("다운로드")
-        self.save_layout = QHBoxLayout()
-        self.save_layout.addStretch(1)
-        self.save_layout.addWidget(self.save_button)
-        self.save_layout.addWidget(self.download_button)
         self.sum_layout.addWidget(self.summary_title)
         self.sum_layout.addWidget(self.summary)
         self.sum_layout.addWidget(self.citation_widget)
-        self.sum_layout.addLayout(self.save_layout)
 
         self.raw_page = QWidget()
         self.raw_layout = QVBoxLayout(self.raw_page)
@@ -192,6 +190,14 @@ class ExpertPanel(QWidget):
         self.main_layout.addWidget(self.content_tab, 2)
         self.layout.addLayout(self.main_layout)
         self.clear_document()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, GRADIENT_TOP)
+        gradient.setColorAt(1.0, GRADIENT_BOTTOM)
+        painter.fillRect(self.rect(), gradient)
+        painter.end()
 
     def _connect(self) -> None:
         self.search.returnPressed.connect(self.run_search)
@@ -357,8 +363,7 @@ class ExpertPanel(QWidget):
         """요청 중 검색·저장 버튼을 잠근다. 연타로 중복 요청이 쌓이지 않게."""
         self._busy = busy
         for widget in (self.search, self.search_button, self.sort,
-                       self.assembly_term, self.agenda, self.result_list,
-                       self.save_button, self.download_button):
+                       self.assembly_term, self.agenda, self.result_list):
             widget.setEnabled(not busy)
         self.busy_changed.emit(busy)
 
