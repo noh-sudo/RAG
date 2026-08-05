@@ -1,4 +1,4 @@
-회의록 요약 RAG 프로젝트
+## 회의록 요약 RAG 프로젝트
 
 push 할땐 반드시 새 브랜치 + 디렉토리로 해주세요!!
 ```
@@ -9,4 +9,8 @@ ex) git pull origin
     git commit -m "easymode 추가"
     git push -u origin feature/easymode
 ```
-+ 7/31 easymode gui 추가
++ 7/31 feature/data 추가
++ 8/1  feature/rag 추가
++ 8/2  feature/gui 추가
+
+----
